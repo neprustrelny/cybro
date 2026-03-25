@@ -1,0 +1,7 @@
+# Optional runtime extras
+scapy>=2.5.0            # advanced packet crafting / srp integrations
+bleak>=0.21.1           # BLE scanning and services
+Pillow>=10.0.0          # image handling for OCR
+pytesseract>=0.3.10     # OCR capabilities
+transformers>=4.40.0    # AI analyzer models
+torch>=2.2.0            # backend for transformers

@@ -1,0 +1,30 @@
+# secrets
+.env
+*.env
+*.key
+*.pem
+
+# databases & captures
+*.db
+*.sqlite
+*.sqlite3
+*.pcap
+*.pcapng
+
+# logs & reports (ak chceš reporty verzovať, vyhoď security_reports/)
+*.log
+logs/
+cybro_logs/
+security_reports/
+packet_captures/
+corrupted_data/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS/editor
+.DS_Store
+Thumbs.db

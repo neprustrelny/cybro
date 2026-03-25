@@ -1,0 +1,39 @@
+CYBRO AI Analysis Report
+Generated: 2026-01-07 07:34:26
+==========================================================================================
+Threat Score: 20/100
+Threat Summary: Recent alerts: 17
+
+NETWORK STATUS
+Gateway: 192.168.1.1
+Network Range: 192.168.1.0/24
+Devices Detected: 4
+Passive Sensor: Online
+
+Observed Devices:
+ - 192.168.1.111   64:70:02:26:18:95  Vendor: Unknown Last: 2026-01-07 07:33:14
+ - 192.168.1.1     FC:22:F4:77:1E:A0  Vendor: Unknown Last: 2026-01-07 07:33:14
+ - 192.168.1.61    F6:80:00:08:A1:37  Vendor: Unknown Last: 2026-01-07 07:33:12
+ - 192.168.1.199   00:12:41:7E:12:DE  Vendor: Unknown Last: 2026-01-07 07:33:12
+
+BLUETOOTH LOW ENERGY OVERVIEW
+BLE Devices Discovered: 0
+
+SYSTEM HEALTH
+Has Sudo: Yes
+Local AI Analyst: Ready
+Network Module: Available
+BLE Module: Available
+
+
+RECENT ALERTS
+[07:32:50] New Device: IP: 192.168.1.199, MAC: 00:12:41:7e:12:de
+[07:33:03] Passive Sensor Event: Device reappeared: 192.168.1.1 (FC:22:F4:77:1E:A0)
+[07:33:03] Passive Sensor Event: Device reappeared: 192.168.1.61 (F6:80:00:08:A1:37)
+[07:33:18] Passive Sensor Event: Device reappeared: 192.168.1.199 (00:12:41:7E:12:DE)
+[07:33:19] Wi-Fi Monitor Mode: Wi-Fi adapter switched to monitor mode. Internet access may be unavailable.
+[07:33:54] No Data: No BLE scan data available
+[07:34:04] Comprehensive Report Generated: Complete security report saved to comprehensive_security_report_20260107_073404.html
+[07:34:12] No Data: No pentest results available
+[07:34:18] Network Report Generated: Network report saved to network_report_20260107_073418.html
+[07:34:24] Comprehensive Report Generated: Complete security report saved to comprehensive_security_report_20260107_073424.html
