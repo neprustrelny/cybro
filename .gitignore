@@ -28,3 +28,40 @@ venv/
 # OS/editor
 .DS_Store
 Thumbs.db
+
+# secrets
+.env
+*.env
+*.key
+*.pem
+
+# databases & captures
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.pcap
+*.pcapng
+
+# logs & reports
+*.log
+logs/
+cybro_logs/
+security_reports/
+packet_captures/
+corrupted_data/
+ultimate/logs/
+ultimate/cybro_logs/
+
+# python
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# OS/editor
+.DS_Store
+Thumbs.db
