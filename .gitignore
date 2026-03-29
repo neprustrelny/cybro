@@ -65,3 +65,5 @@ venv/
 # OS/editor
 .DS_Store
 Thumbs.db
+*.wav
+voice_cache/

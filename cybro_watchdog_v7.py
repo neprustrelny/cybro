@@ -28,6 +28,8 @@ import hashlib
 import base64
 import csv
 import ipaddress
+import signal
+import wave
 from queue import Queue
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import webbrowser
@@ -3793,6 +3795,14 @@ class UltimateCyberpunkGUI:
         self.ai_chat_last_cloud_preview_hash = ""
         self.ai_chat_last_cloud_preview_chars = 0
         self.ai_chat_last_cloud_preview_flags = {}
+        self.voice_mode_var = tk.StringVar(master=self.root, value="ptt")
+        self.voice_auto_send_var = tk.BooleanVar(master=self.root, value=False)
+        self.voice_recording = False
+        self.voice_proc = None
+        self.voice_last_file = ""
+        self.ai_chat_voice_mode_menu = None
+        self.ai_chat_voice_button = None
+        self.ai_chat_voice_auto_send_check = None
 
         self.setup_gui()
         
@@ -4674,6 +4684,231 @@ System Status:
         dialog.wait_window()
         return result["confirmed"]
 
+    def _ensure_voice_cache_dir(self) -> Path:
+        cache_dir = PROJECT_ROOT / "voice_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir
+
+    def _hash_file_sha256(self, file_path: Path) -> str:
+        digest = hashlib.sha256()
+        with file_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(65536), b""):
+                digest.update(chunk)
+        return digest.hexdigest()[:12]
+
+    def _get_wav_duration_seconds(self, file_path: Path) -> float:
+        try:
+            with wave.open(str(file_path), "rb") as wav_file:
+                frame_rate = wav_file.getframerate() or 1
+                return round(wav_file.getnframes() / float(frame_rate), 2)
+        except Exception:
+            return 0.0
+
+    def _sync_voice_button_mode(self, *_args) -> None:
+        if not self.ai_chat_voice_button:
+            return
+        self.ai_chat_voice_button.unbind("<ButtonPress-1>")
+        self.ai_chat_voice_button.unbind("<ButtonRelease-1>")
+        if self.voice_mode_var.get() == "ptt":
+            self.ai_chat_voice_button.config(command=lambda: None, text="🎙 hold")
+            self.ai_chat_voice_button.bind("<ButtonPress-1>", self._on_voice_press)
+            self.ai_chat_voice_button.bind("<ButtonRelease-1>", self._on_voice_release)
+        else:
+            self.ai_chat_voice_button.config(command=self._toggle_voice_record, text="🎙 click")
+        if self.voice_recording:
+            self.ai_chat_voice_button.config(text="■ REC")
+
+    def _record_voice_start(self) -> None:
+        if self.voice_recording:
+            return
+        cache_dir = self._ensure_voice_cache_dir()
+        output_file = cache_dir / f"voice_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+        try:
+            proc = subprocess.Popen(
+                ["arecord", "-q", "-f", "S16_LE", "-r", "16000", "-c", "1", str(output_file)],
+                cwd=str(PROJECT_ROOT),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as exc:
+            self.notification_system.add_notification("AI Chat Voice", f"Voice start failed: {exc}", 'warning', 7000)
+            return
+
+        self.voice_proc = proc
+        self.voice_recording = True
+        self.voice_last_file = str(output_file)
+        if self.ai_chat_voice_button:
+            self.ai_chat_voice_button.config(text="■ REC")
+        self.notification_system.add_notification("AI Chat Voice", f"Recording started ({self.voice_mode_var.get().upper()})", 'info', 2500)
+
+    def _prompt_voice_token(self, preview_hash: str) -> bool:
+        result = {"confirmed": False}
+        expected = f"SEND-{preview_hash}"
+        file_path = Path(self.voice_last_file) if self.voice_last_file else None
+        bytes_count = file_path.stat().st_size if file_path and file_path.exists() else 0
+        seconds = self._get_wav_duration_seconds(file_path) if file_path and file_path.exists() else 0.0
+        mode_name = self.voice_mode_var.get()
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Confirm Voice Placeholder")
+        dialog.geometry("560x280")
+        dialog.configure(bg=self.colors['background'])
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        summary = (
+            f"file={file_path}\n"
+            f"bytes={bytes_count}\n"
+            f"seconds={seconds:.2f}\n"
+            f"hash={preview_hash}\n"
+            f"include_flags=voice_only\n"
+            f"mode={mode_name}"
+        )
+
+        tk.Label(
+            dialog,
+            text="Paranoid local voice preview",
+            font=("Courier New", 10, "bold"),
+            bg=self.colors['background'],
+            fg=self.colors['primary'],
+        ).pack(anchor="w", padx=12, pady=(14, 8))
+
+        summary_box = scrolledtext.ScrolledText(
+            dialog,
+            height=7,
+            wrap=tk.WORD,
+            font=("Courier New", 9),
+            bg=self.colors['surface'],
+            fg=self.colors['text_primary'],
+            relief='flat',
+        )
+        summary_box.pack(fill=tk.X, padx=12, pady=(0, 10))
+        summary_box.insert("1.0", summary)
+        summary_box.config(state=tk.DISABLED)
+
+        tk.Label(
+            dialog,
+            text=f"Type {expected} to confirm",
+            font=("Courier New", 10, "bold"),
+            bg=self.colors['background'],
+            fg=self.colors['text_primary'],
+        ).pack(padx=12, pady=(0, 8))
+
+        entry = tk.Entry(
+            dialog,
+            font=("Courier New", 10),
+            bg=self.colors['surface'],
+            fg=self.colors['text_primary'],
+            insertbackground=self.colors['text_primary'],
+            relief='flat',
+        )
+        entry.pack(fill=tk.X, padx=12, pady=(0, 10), ipady=6)
+        entry.focus_set()
+
+        feedback = tk.Label(
+            dialog,
+            text="",
+            font=("Courier New", 9),
+            bg=self.colors['background'],
+            fg="#ff6b6b",
+        )
+        feedback.pack(padx=12, pady=(0, 8))
+
+        def confirm() -> None:
+            if entry.get().strip() == expected:
+                result["confirmed"] = True
+                dialog.destroy()
+            else:
+                feedback.config(text="Confirmation token mismatch.")
+
+        tk.Button(
+            dialog,
+            text="Confirm",
+            command=confirm,
+            font=("Courier New", 9, "bold"),
+            bg=self.colors['accent'],
+            fg='white',
+            relief='flat',
+            padx=12,
+            pady=6,
+        ).pack(pady=(0, 12))
+
+        dialog.wait_window()
+        return result["confirmed"]
+
+    def _record_voice_stop(self) -> None:
+        if not self.voice_recording:
+            return
+
+        proc = self.voice_proc
+        self.voice_recording = False
+        self.voice_proc = None
+        if self.ai_chat_voice_button:
+            self._sync_voice_button_mode()
+
+        if proc:
+            try:
+                proc.send_signal(signal.SIGINT)
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+                try:
+                    proc.wait(timeout=2)
+                except Exception:
+                    pass
+
+        file_path = Path(self.voice_last_file) if self.voice_last_file else None
+        if not file_path or not file_path.exists():
+            self.notification_system.add_notification("AI Chat Voice", "No local WAV file was created.", 'warning', 7000)
+            return
+
+        bytes_count = file_path.stat().st_size
+        if bytes_count <= 0:
+            self.notification_system.add_notification("AI Chat Voice", "Recorded WAV is empty.", 'warning', 7000)
+            return
+
+        seconds = self._get_wav_duration_seconds(file_path)
+        preview_hash = self._hash_file_sha256(file_path)
+        self._append_ai_chat_transcript("SYSTEM", f"VOICE recorded: bytes={bytes_count}, seconds={seconds:.2f}, hash={preview_hash}")
+
+        if not self._prompt_voice_token(preview_hash):
+            self.notification_system.add_notification("AI Chat Voice", "Voice placeholder cancelled.", 'info', 5000)
+            return
+
+        if not self.ai_chat_input:
+            return
+
+        placeholder = f"[VOICE_READY] file={file_path} hash={preview_hash} mode={self.voice_mode_var.get()}"
+        current_text = self.ai_chat_input.get().strip()
+        new_text = f"{current_text} {placeholder}".strip() if current_text else placeholder
+        self.ai_chat_input.delete(0, tk.END)
+        self.ai_chat_input.insert(0, new_text)
+        self.ai_chat_input.focus_force()
+
+    def _toggle_voice_record(self) -> None:
+        if self.voice_recording:
+            self._record_voice_stop()
+        else:
+            self._record_voice_start()
+
+    def _on_voice_press(self, event=None):
+        if self.voice_mode_var.get() != "ptt":
+            return None
+        self._record_voice_start()
+        return "break"
+
+    def _on_voice_release(self, event=None):
+        if self.voice_mode_var.get() != "ptt":
+            return None
+        self._record_voice_stop()
+        return "break"
+
     def preview_ai_chat_cloud_payload(self) -> None:
         if not self.ai_chat_cloud_assist_var.get():
             self.notification_system.add_notification("Cloud Assist", "Enable Cloud Assist before preview.", 'warning', 6000)
@@ -4782,6 +5017,20 @@ System Status:
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_ai_chat_close(self) -> None:
+        if self.voice_recording and self.voice_proc:
+            try:
+                self.voice_proc.send_signal(signal.SIGINT)
+            except Exception:
+                pass
+            try:
+                self.voice_proc.wait(timeout=1)
+            except Exception:
+                try:
+                    self.voice_proc.terminate()
+                except Exception:
+                    pass
+            self.voice_recording = False
+            self.voice_proc = None
         if self.ai_chat_window:
             self.ai_chat_window.destroy()
         self.ai_chat_window = None
@@ -4795,6 +5044,9 @@ System Status:
         self.ai_chat_scope_convo_radio = None
         self.ai_chat_cloud_model_entry = None
         self.ai_chat_cloud_whitelist_controls = []
+        self.ai_chat_voice_mode_menu = None
+        self.ai_chat_voice_button = None
+        self.ai_chat_voice_auto_send_check = None
 
     def open_ai_chat(self) -> None:
         if self.ai_chat_window and self.ai_chat_window.winfo_exists():
@@ -5063,6 +5315,68 @@ System Status:
             pady=8,
         )
         self.ai_chat_send_button.pack(side=tk.RIGHT)
+
+        voice_controls = tk.Frame(input_row, bg=self.colors['background'])
+        voice_controls.pack(side=tk.RIGHT, padx=(0, 8))
+
+        tk.Label(
+            voice_controls,
+            text="Voice mode",
+            font=("Courier New", 9, "bold"),
+            bg=self.colors['background'],
+            fg=self.colors['text_primary'],
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        self.ai_chat_voice_mode_menu = tk.OptionMenu(
+            voice_controls,
+            self.voice_mode_var,
+            "ptt",
+            "ptt",
+            "click",
+            command=self._sync_voice_button_mode,
+        )
+        self.ai_chat_voice_mode_menu.config(
+            font=("Courier New", 9, "bold"),
+            bg=self.colors['surface'],
+            fg=self.colors['text_primary'],
+            activebackground=self.colors['surface'],
+            activeforeground=self.colors['text_primary'],
+            highlightthickness=0,
+            relief='flat',
+        )
+        self.ai_chat_voice_mode_menu["menu"].config(
+            bg=self.colors['surface'],
+            fg=self.colors['text_primary'],
+            activebackground=self.colors['accent'],
+            activeforeground='white',
+        )
+        self.ai_chat_voice_mode_menu.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.ai_chat_voice_button = tk.Button(
+            voice_controls,
+            text="🎙",
+            font=("Courier New", 10, "bold"),
+            bg=self.colors['accent'],
+            fg='white',
+            relief='flat',
+            padx=12,
+            pady=8,
+        )
+        self.ai_chat_voice_button.pack(side=tk.LEFT, padx=(0, 8))
+
+        self.ai_chat_voice_auto_send_check = tk.Checkbutton(
+            voice_controls,
+            text="Auto-send after stop",
+            variable=self.voice_auto_send_var,
+            font=("Courier New", 9),
+            bg=self.colors['background'],
+            fg=self.colors['text_primary'],
+            selectcolor=self.colors['surface'],
+            activebackground=self.colors['background'],
+            activeforeground=self.colors['text_primary'],
+        )
+        self.ai_chat_voice_auto_send_check.pack(side=tk.LEFT)
+        self._sync_voice_button_mode()
 
         self._refresh_ai_chat_status()
         self._sync_ai_chat_cloud_controls()
